@@ -33,11 +33,18 @@ function gridLayout(nodes) {
 function edgeListToAdj(text, undirected = true) {
   const adj = {};
   const lines = text.split("\n").map((s) => s.trim()).filter(Boolean);
+  let invalid = 0;
 
   for (const line of lines) {
     const [aStr, bStr] = line.split(/\s+/);
-    const a = Number(aStr), b = Number(bStr);
-    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const a = Number(aStr);
+    const b = Number(bStr);
+    const validA = Number.isInteger(a) && a > 0;
+    const validB = Number.isInteger(b) && b > 0;
+    if (!validA || !validB) {
+      invalid += 1;
+      continue;
+    }
 
     if (!adj[a]) adj[a] = [];
     adj[a].push(b);
@@ -47,7 +54,7 @@ function edgeListToAdj(text, undirected = true) {
       adj[b].push(a);
     }
   }
-  return adj;
+  return { adj, invalid };
 }
 
 function undirectedEdges(adj) {
@@ -73,32 +80,58 @@ export default function App() {
   const [data, setData] = useState(null);
   const [visited, setVisited] = useState(new Set());
   const [sValue, setSValue] = useState("1");
+  const [endValue, setEndValue] = useState("1");
+  const [selectedAlgo, setSelectedAlgo] = useState("bfs");
   const [edgeText, setEdgeText] = useState("1 2\n2 3\n3 4\n4 5");
+  const [notice, setNotice] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
 
   const runUserGraph = async (algo) => {
-    const graph = edgeListToAdj(edgeText, true);
+    setIsRunning(true);
+    setNotice("");
+    setData(null);
+    setVisited(new Set());
+    const { adj: graph, invalid } = edgeListToAdj(edgeText, true);
+    if (invalid > 0) {
+      setNotice("Edges must be positive integers (u v). Please fix the invalid lines.");
+      setIsRunning(false);
+      return;
+    }
 
     const start = Number(sValue);
-    if (algo === "bfs" && !Number.isFinite(start)) {
-      alert("Enter a valid start node for BFS.");
+    const validStart = Number.isInteger(start) && start > 0;
+    if (algo === "bfs" && !validStart) {
+      setNotice("Enter a valid positive integer for the start node.");
+      setIsRunning(false);
+      return;
+    }
+
+    const end = Number(endValue);
+    const validEnd = Number.isInteger(end) && end > 0;
+    if (algo === "shortestpath" && (!validStart || !validEnd)) {
+      setNotice("Enter valid positive integers for start and end nodes to find the shortest path.");
+      setIsRunning(false);
       return;
     }
 
     const res = await fetch("/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph, start, algo }),
+      body: JSON.stringify({ graph, start, algo, end }),
     });
 
     const json = await res.json();
     if (!res.ok) {
       console.error(json);
-      alert(json?.error || "Backend error");
+      setNotice(json?.error || "Backend error");
+      setIsRunning(false);
       return;
     }
 
     setData(json);
     setVisited(new Set());
+    setIsRunning(false);
+    return true;
   };
 
   const animate = () => {
@@ -126,43 +159,73 @@ export default function App() {
   const edges = useMemo(() => (data?.graph ? undirectedEdges(data.graph) : []), [data]);
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ marginBottom: 12 }}>
-        <div>Edges (one per line: "u v"):</div>
-        <textarea
-          rows={6}
-          cols={30}
-          value={edgeText}
-          onChange={(e) => setEdgeText(e.target.value)}
-          style={{ display: "block", marginTop: 6 }}
-        />
+    <div className="page">
+      <div className="panel">
+        <h1>Visualize graph algorithms!</h1>
+        <label className="field">
+          <span className="field-label">Edges (one per line: "u v")</span>
+          <textarea
+            rows={6}
+            value={edgeText}
+            onChange={(e) => setEdgeText(e.target.value)}
+            className="edge-input"
+          />
+        </label>
+        {notice && <div className="notice">{notice}</div>}
+        <div className="control-grid">
+          <label className="field">
+            <span className="field-label">Starting point</span>
+            <input
+              type="number"
+              value={sValue}
+              onChange={(e) => setSValue(e.target.value)}
+              placeholder="Start node"
+            />
+          </label>
+          {selectedAlgo === "shortestpath" && (
+            <label className="field">
+              <span className="field-label">Endpoint (shortest path)</span>
+              <input
+                type="number"
+                value={endValue}
+                onChange={(e) => setEndValue(e.target.value)}
+                placeholder="End node"
+              />
+            </label>
+          )}
+          <label className="field">
+            <span className="field-label">Algorithm</span>
+            <select
+              value={selectedAlgo}
+              onChange={(e) => setSelectedAlgo(e.target.value)}
+            >
+              <option value="bfs">Breadth-first search</option>
+              <option value="dfs">Depth-first search</option>
+              <option value="shortestpath">Shortest path (unweighted)</option>
+            </select>
+          </label>
+        </div>
+        <div className="action-row">
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = await runUserGraph(selectedAlgo);
+              if (ok) setTimeout(() => animate(), 0);
+            }}
+            disabled={isRunning}
+          >
+            {isRunning ? "Running..." : `Run ${selectedAlgo === "shortestpath" ? "shortest path" : selectedAlgo.toUpperCase()}`}
+          </button>
+        </div>
       </div>
 
-      <input
-        type="number"
-        value={sValue}
-        onChange={(e) => setSValue(e.target.value)}
-        placeholder="Start node (s)"
-      />
-
-      <button type="button" onClick={() => runUserGraph("bfs")}>
-        Run BFS (user graph)
-      </button>
-      <button type="button" onClick={() => runUserGraph("dfs")}>
-        Run DFS (user graph)
-      </button>
-
-      <button type="button" onClick={animate} disabled={!data}>
-        Animate
-      </button>
-
       {data && (
-        <>
-          <div style={{ margin: "8px 0" }}>
-            Order: {data.order.join(" → ")}
+        <div className="panel">
+          <div className="result-row">
+            Order: {data.order.join(" -> ")}
           </div>
 
-          <svg width={WIDTH} height={HEIGHT} style={{ border: "1px solid #ccc" }}>
+          <svg width={WIDTH} height={HEIGHT} className="graph-area">
             {edges.map(([u, v]) => (
               <line
                 key={`${u}-${v}`}
@@ -195,7 +258,7 @@ export default function App() {
               </g>
             ))}
           </svg>
-        </>
+        </div>
       )}
     </div>
   );

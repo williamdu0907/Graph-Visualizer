@@ -6,9 +6,7 @@ from collections import deque
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="/")
 CORS(app) 
 
-class Graph: # graph = dictionary, keys are vertices composed of integers, values are array of integers
-    #signifying that all elements of the array are adjacent to the key
-
+class Graph:
     def __init__(self, dict):
         self.graph_dict = dict
 
@@ -28,12 +26,12 @@ def dfs(G):
 
     for v in G.getVertices():
         color[v] = "WHITE"
-        prev[v] = None
+        prev[v] = None 
 
     def dfs_visit(u):
         time[0] += 1
         color[u] = "GRAY"
-        order.append(u)      # ← collect instead of print
+        order.append(u)
         for v in G.getAdjacent(u):
             if color[v] == "WHITE":
                 prev[v] = u
@@ -76,6 +74,47 @@ def bfs(G, s):
         color[u] = "BLACK"
     return {"order":order, "prev":prev}
 
+#shortestPath from s to b, assuming a and b are vertices of G
+def shortestPath(G, s, b):
+    color, d, prev = {}, {}, {}
+    order = []
+    for v in G.getVertices():
+        color[v] = "WHITE"
+        d[v] = math.inf
+        prev[v] = None
+    color[s] = "GRAY"
+    d[s] = 0
+    prev[s] = None
+    queue = deque()
+    queue.append(s)
+    while queue:
+        u = queue.popleft()
+        order.append(u)
+        for v in G.getAdjacent(u):
+            if color[v] == "WHITE":
+                color[v] = "GRAY"
+                d[v] = d[u] + 1
+                prev[v] = u
+                queue.append(v)
+        color[u] = "BLACK"
+        if u == b:
+            path = []
+            curr = u
+            seen = set()
+            max_steps = len(prev) + 1  # guard against bad predecessor cycles
+            steps = 0
+            while curr is not None:
+                if curr in seen or steps > max_steps:
+                    raise ValueError("Invalid predecessor chain detected while building path.")
+                seen.add(curr)
+                path.append(curr)
+                curr = prev[curr]
+                steps += 1
+            path.reverse()
+            return {"distance": d[u], "order":path, "prev":prev}
+    return {"distance": "NO PATH", "order":order, "prev":prev}
+
+
 
 x = Graph({1:[2], 2:[3, 1], 3:[4,2], 4:[5, 3], 5:[4]})
 
@@ -102,6 +141,10 @@ def dfs_route():
         "graph": x.graph_dict
     })
 
+@app.route("/shortestpath/<int:s>/<int:b>")
+def shortestpath_route(s, b):
+    return jsonify({"order": shortestPath(x, s, b)["order"], "graph":x.graph_dict})
+
 
 def parse_graph(adj_json):
     # adj_json like {"1":[2,3], "2":[1], ...}
@@ -115,13 +158,20 @@ def run_algo():
     G = parse_graph(data["graph"]) 
     algo = data.get("algo", "bfs")
     s = int(data.get("start", 1))
-
+    b = int(data.get("end", 1))
     if algo == "bfs":
         if s not in G.getVertices():
             return jsonify({"error": f"start node {s} not in graph"}), 400
         out = bfs(G, s)
     elif algo == "dfs":
         out = dfs(G)
+    elif algo == "shortestpath":
+        if s not in G.getVertices() or b not in G.getVertices():
+            return jsonify({"error": f"Endpoints are not vertices of the graph"}), 400
+        try:
+            out = shortestPath(G, s, b)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
     else:
         return jsonify({"error": "unknown algo"}), 400
 
