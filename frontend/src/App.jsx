@@ -1,60 +1,57 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const WIDTH = 700;
 const HEIGHT = 450;
 const NODE_R = 22;
+const NODE_ID_RE = /^\d+,\d+$/;
 
-function gridLayout(nodes) {
-  const n = nodes.length;
-  if (n === 0) return {};
-
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
+function gridLayout(n, m) {
+  if (n <= 0 || m <= 0) return {};
 
   const padX = 50;
   const padY = 50;
-
-  const cellW = (WIDTH - 2 * padX) / Math.max(1, cols - 1);
-  const cellH = (HEIGHT - 2 * padY) / Math.max(1, rows - 1);
+  const cellW = (WIDTH - 2 * padX) / Math.max(1, m - 1);
+  const cellH = (HEIGHT - 2 * padY) / Math.max(1, n - 1);
 
   const pos = {};
-  nodes.forEach((id, i) => {
-    const r = Math.floor(i / cols);
-    const c = i % cols;
-    pos[id] = {
-      x: padX + c * cellW,
-      y: padY + r * cellH,
-    };
-  });
-
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < m; j += 1) {
+      const id = `${i},${j}`;
+      pos[id] = {
+        x: padX + j * cellW,
+        y: padY + i * cellH,
+      };
+    }
+  }
   return pos;
 }
 
-function edgeListToAdj(text, undirected = true) {
+function parseNodeId(token) {
+  if (!NODE_ID_RE.test(token)) return null;
+  const [iStr, jStr] = token.split(",");
+  return { i: Number(iStr), j: Number(jStr) };
+}
+
+function gridToAdj(n, m, undirected = true) {
   const adj = {};
-  const lines = text.split("\n").map((s) => s.trim()).filter(Boolean);
-  let invalid = 0;
-
-  for (const line of lines) {
-    const [aStr, bStr] = line.split(/\s+/);
-    const a = Number(aStr);
-    const b = Number(bStr);
-    const validA = Number.isInteger(a) && a > 0;
-    const validB = Number.isInteger(b) && b > 0;
-    if (!validA || !validB) {
-      invalid += 1;
-      continue;
-    }
-
-    if (!adj[a]) adj[a] = [];
-    adj[a].push(b);
-
-    if (undirected) {
-      if (!adj[b]) adj[b] = [];
-      adj[b].push(a);
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < m; j += 1) {
+      const id = `${i},${j}`;
+      adj[id] = [];
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ni = i + di;
+        const nj = j + dj;
+        if (ni < 0 || ni >= n || nj < 0 || nj >= m) continue;
+        const nid = `${ni},${nj}`;
+        adj[id].push(nid);
+        if (undirected) {
+          if (!adj[nid]) adj[nid] = [];
+          adj[nid].push(id);
+        }
+      }
     }
   }
-  return { adj, invalid };
+  return adj;
 }
 
 function undirectedEdges(adj) {
@@ -62,11 +59,10 @@ function undirectedEdges(adj) {
   const seen = new Set();
 
   for (const [uStr, nbrs] of Object.entries(adj)) {
-    const u = Number(uStr);
     for (const v of nbrs) {
-      const a = Math.min(u, v);
-      const b = Math.max(u, v);
-      const key = `${a}-${b}`;
+      const a = uStr < v ? uStr : v;
+      const b = uStr < v ? v : uStr;
+      const key = `${a}|${b}`;
       if (!seen.has(key)) {
         seen.add(key);
         edges.push([a, b]);
@@ -79,37 +75,65 @@ function undirectedEdges(adj) {
 export default function App() {
   const [data, setData] = useState(null);
   const [visited, setVisited] = useState(new Set());
-  const [sValue, setSValue] = useState("1");
-  const [endValue, setEndValue] = useState("1");
+  const [sValue, setSValue] = useState("0,0");
+  const [endValue, setEndValue] = useState("0,0");
+  const [nValue, setNValue] = useState("3");
+  const [mValue, setMValue] = useState("3");
   const [selectedAlgo, setSelectedAlgo] = useState("bfs");
-  const [edgeText, setEdgeText] = useState("1 2\n2 3\n3 4\n4 5");
   const [notice, setNotice] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const timeoutsRef = useRef([]);
+
+  const clearAnimation = () => {
+    timeoutsRef.current.forEach((id) => clearTimeout(id));
+    timeoutsRef.current = [];
+  };
+
+  useEffect(() => {
+    const n = Number(nValue);
+    const m = Number(mValue);
+    clearAnimation();
+    setVisited(new Set());
+    if (Number.isInteger(n) && n >= 1 && Number.isInteger(m) && m >= 1) {
+      setSValue("0,0");
+      setEndValue(`${n - 1},${m - 1}`);
+    } else {
+      setSValue("0,0");
+      setEndValue("0,0");
+    }
+  }, [nValue, mValue]);
 
   const runUserGraph = async (algo) => {
+    clearAnimation();
     setIsRunning(true);
     setNotice("");
     setData(null);
     setVisited(new Set());
-    const { adj: graph, invalid } = edgeListToAdj(edgeText, true);
-    if (invalid > 0) {
-      setNotice("Edges must be positive integers (u v). Please fix the invalid lines.");
+    const n = Number(nValue);
+    const m = Number(mValue);
+    const validN = Number.isInteger(n) && n >= 1;
+    const validM = Number.isInteger(m) && m >= 1;
+    if (!validN || !validM) {
+      setNotice("Enter valid integers n, m >= 1.");
       setIsRunning(false);
       return;
     }
+    const graph = gridToAdj(n, m, true);
 
-    const start = Number(sValue);
-    const validStart = Number.isInteger(start) && start > 0;
+    const start = sValue.trim();
+    const startPos = parseNodeId(start);
+    const validStart = !!startPos && startPos.i >= 0 && startPos.i < n && startPos.j >= 0 && startPos.j < m;
     if (algo === "bfs" && !validStart) {
-      setNotice("Enter a valid positive integer for the start node.");
+      setNotice('Enter a start node like "0,0" that is inside the grid.');
       setIsRunning(false);
       return;
     }
 
-    const end = Number(endValue);
-    const validEnd = Number.isInteger(end) && end > 0;
+    const end = endValue.trim();
+    const endPos = parseNodeId(end);
+    const validEnd = !!endPos && endPos.i >= 0 && endPos.i < n && endPos.j >= 0 && endPos.j < m;
     if (algo === "shortestpath" && (!validStart || !validEnd)) {
-      setNotice("Enter valid positive integers for start and end nodes to find the shortest path.");
+      setNotice('Enter start/end nodes like "0,0" that are inside the grid.');
       setIsRunning(false);
       return;
     }
@@ -136,11 +160,13 @@ export default function App() {
 
   const animate = () => {
     if (!data?.order) return;
+    clearAnimation();
     setVisited(new Set());
     data.order.forEach((id, i) => {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setVisited((prev) => new Set(prev).add(id));
-      }, i * 400);
+      }, i * 200);
+      timeoutsRef.current.push(timeoutId);
     });
   };
 
@@ -149,47 +175,78 @@ export default function App() {
     if (!data?.graph) return [];
     const s = new Set();
     for (const [uStr, nbrs] of Object.entries(data.graph)) {
-      s.add(Number(uStr));
-      for (const v of nbrs) s.add(Number(v));
+      s.add(uStr);
+      for (const v of nbrs) s.add(v);
     }
-    return [...s].sort((a, b) => a - b);
+    return [...s].sort((a, b) => {
+      const aPos = parseNodeId(a);
+      const bPos = parseNodeId(b);
+      if (!aPos || !bPos) return a.localeCompare(b);
+      if (aPos.i !== bPos.i) return aPos.i - bPos.i;
+      return aPos.j - bPos.j;
+    });
   }, [data]);
 
-  const pos = useMemo(() => gridLayout(nodes), [nodes]);
+  const gridSize = useMemo(() => {
+    let maxI = -1;
+    let maxJ = -1;
+    for (const id of nodes) {
+      const pos = parseNodeId(id);
+      if (!pos) continue;
+      maxI = Math.max(maxI, pos.i);
+      maxJ = Math.max(maxJ, pos.j);
+    }
+    return { n: maxI + 1, m: maxJ + 1 };
+  }, [nodes]);
+
+  const pos = useMemo(() => gridLayout(gridSize.n, gridSize.m), [gridSize]);
   const edges = useMemo(() => (data?.graph ? undirectedEdges(data.graph) : []), [data]);
 
   return (
     <div className="page">
       <div className="panel">
         <h1>Visualize graph algorithms!</h1>
-        <label className="field">
-          <span className="field-label">Edges (one per line: "u v")</span>
-          <textarea
-            rows={6}
-            value={edgeText}
-            onChange={(e) => setEdgeText(e.target.value)}
-            className="edge-input"
-          />
-        </label>
+        <div className="control-grid">
+          <label className="field">
+            <span className="field-label">Rows (n)</span>
+            <input
+              type="number"
+              min="1"
+              value={nValue}
+              onChange={(e) => setNValue(e.target.value)}
+              placeholder="n"
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Columns (m)</span>
+            <input
+              type="number"
+              min="1"
+              value={mValue}
+              onChange={(e) => setMValue(e.target.value)}
+              placeholder="m"
+            />
+          </label>
+        </div>
         {notice && <div className="notice">{notice}</div>}
         <div className="control-grid">
           <label className="field">
             <span className="field-label">Starting point</span>
             <input
-              type="number"
+              type="text"
               value={sValue}
               onChange={(e) => setSValue(e.target.value)}
-              placeholder="Start node"
+              placeholder="0,0"
             />
           </label>
           {selectedAlgo === "shortestpath" && (
             <label className="field">
               <span className="field-label">Endpoint (shortest path)</span>
               <input
-                type="number"
+                type="text"
                 value={endValue}
                 onChange={(e) => setEndValue(e.target.value)}
-                placeholder="End node"
+                placeholder="0,0"
               />
             </label>
           )}

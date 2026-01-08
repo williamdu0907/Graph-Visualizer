@@ -17,6 +17,21 @@ class Graph:
         if not v in self.getVertices():
             raise Exception("not a vertice")
         return self.graph_dict[v]
+    
+# convert n by m grid into a dict
+def grid_to_adj(n, m):
+    adj = {}
+    for i in range(n):
+        for j in range(m):
+            key = f"{i},{j}"
+            adj[key] = []
+            for di, dj in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                ni, nj = i + di, j + dj
+                if 0 <= ni < n and 0 <= nj < m:
+                    adj[key].append(f"{ni},{nj}")
+    return adj
+
+
 
     
 def dfs(G):
@@ -116,7 +131,7 @@ def shortestPath(G, s, b):
 
 
 
-x = Graph({1:[2], 2:[3, 1], 3:[4,2], 4:[5, 3], 5:[4]})
+x = Graph(grid_to_adj(3, 3))
 
 
 
@@ -129,7 +144,7 @@ def serve_frontend():
 def hello():
     return "Hello, World"
 
-@app.route("/bfs/<int:s>")
+@app.route("/bfs/<string:s>")
 def bfs_route(s):
     return jsonify({"order": bfs(x, s)["order"], "graph":x.graph_dict})
 
@@ -141,15 +156,13 @@ def dfs_route():
         "graph": x.graph_dict
     })
 
-@app.route("/shortestpath/<int:s>/<int:b>")
+@app.route("/shortestpath/<string:s>/<string:b>")
 def shortestpath_route(s, b):
     return jsonify({"order": shortestPath(x, s, b)["order"], "graph":x.graph_dict})
 
-
 def parse_graph(adj_json):
-    # adj_json like {"1":[2,3], "2":[1], ...}
-    adj = {int(k): [int(v) for v in vs] for k, vs in adj_json.items()}
-    return Graph(adj)
+    return Graph(adj_json)
+
 
 @app.route("/run", methods=["POST"])
 def run_algo():
@@ -157,8 +170,8 @@ def run_algo():
 
     G = parse_graph(data["graph"]) 
     algo = data.get("algo", "bfs")
-    s = int(data.get("start", 1))
-    b = int(data.get("end", 1))
+    s = data.get("start", "0,0")
+    b = data.get("end", "0,0")
     if algo == "bfs":
         if s not in G.getVertices():
             return jsonify({"error": f"start node {s} not in graph"}), 400
