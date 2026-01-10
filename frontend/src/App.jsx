@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const WIDTH = 700;
 const HEIGHT = 450;
 const NODE_R = 22;
+const MAX_GRID = 20;
+const ANIMATION_MS_PER_NODE = 400;
 const NODE_ID_RE = /^\d+,\d+$/;
 
 function gridLayout(n, m) {
@@ -75,6 +77,7 @@ function undirectedEdges(adj) {
 export default function App() {
   const [data, setData] = useState(null);
   const [visited, setVisited] = useState(new Set());
+  const [blocked, setBlocked] = useState(new Set());
   const [sValue, setSValue] = useState("0,0");
   const [endValue, setEndValue] = useState("0,0");
   const [nValue, setNValue] = useState("3");
@@ -94,6 +97,7 @@ export default function App() {
     const m = Number(mValue);
     clearAnimation();
     setVisited(new Set());
+    setBlocked(new Set());
     if (Number.isInteger(n) && n >= 1 && Number.isInteger(m) && m >= 1) {
       setSValue("0,0");
       setEndValue(`${n - 1},${m - 1}`);
@@ -103,6 +107,21 @@ export default function App() {
     }
   }, [nValue, mValue]);
 
+
+  function clearAll() {
+    clearAnimation();
+    setData(null);
+    setVisited(new Set());
+    setBlocked(new Set());
+    setSValue("0,0");
+    setEndValue("0,0");
+    setNValue("3");
+    setMValue("3");
+    setSelectedAlgo("bfs");
+    setNotice("");
+    setIsRunning(false);
+  }
+
   const runUserGraph = async (algo) => {
     clearAnimation();
     setIsRunning(true);
@@ -111,14 +130,15 @@ export default function App() {
     setVisited(new Set());
     const n = Number(nValue);
     const m = Number(mValue);
-    const validN = Number.isInteger(n) && n >= 1;
-    const validM = Number.isInteger(m) && m >= 1;
+    const validN = Number.isInteger(n) && n >= 1 && n <= MAX_GRID;
+    const validM = Number.isInteger(m) && m >= 1 && m <= MAX_GRID;
     if (!validN || !validM) {
-      setNotice("Enter valid integers n, m >= 1.");
+      setNotice(`Enter valid integers n, m between 1 and ${MAX_GRID}.`);
       setIsRunning(false);
       return;
     }
     const graph = gridToAdj(n, m, true);
+    const blockedList = [...blocked];
 
     const start = sValue.trim();
     const startPos = parseNodeId(start);
@@ -140,8 +160,8 @@ export default function App() {
 
     const res = await fetch("/run", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph, start, algo, end }),
+      headers: {"Content-Type": "application/json" },
+      body: JSON.stringify({ graph, start, algo, end, blocked: blockedList }),
     });
 
     const json = await res.json();
@@ -152,10 +172,17 @@ export default function App() {
       return;
     }
 
+    const noPath = json?.distance === "NO PATH";
+    if (algo === "shortestpath" && noPath) {
+      setNotice("No path found between the selected nodes.");
+    } else if (algo === "bfs" && noPath) {
+      setNotice("Start node is blocked or unreachable.");
+    }
+
     setData(json);
     setVisited(new Set());
     setIsRunning(false);
-    return true;
+    return { ok: true, animate: !(algo === "shortestpath" && noPath) };
   };
 
   const animate = () => {
@@ -165,16 +192,26 @@ export default function App() {
     data.order.forEach((id, i) => {
       const timeoutId = setTimeout(() => {
         setVisited((prev) => new Set(prev).add(id));
-      }, i * 200);
+      }, i * ANIMATION_MS_PER_NODE);
       timeoutsRef.current.push(timeoutId);
     });
   };
 
+  const baseGraph = useMemo(() => {
+    if (data?.graph) return data.graph;
+    const n = Number(nValue);
+    const m = Number(mValue);
+    const validN = Number.isInteger(n) && n >= 1 && n <= MAX_GRID;
+    const validM = Number.isInteger(m) && m >= 1 && m <= MAX_GRID;
+    if (!validN || !validM) return null;
+    return gridToAdj(n, m, true);
+  }, [data, nValue, mValue]);
+
   // IMPORTANT: include neighbor-only nodes too (prevents pos[v] being undefined)
   const nodes = useMemo(() => {
-    if (!data?.graph) return [];
+    if (!baseGraph) return [];
     const s = new Set();
-    for (const [uStr, nbrs] of Object.entries(data.graph)) {
+    for (const [uStr, nbrs] of Object.entries(baseGraph)) {
       s.add(uStr);
       for (const v of nbrs) s.add(v);
     }
@@ -200,18 +237,32 @@ export default function App() {
   }, [nodes]);
 
   const pos = useMemo(() => gridLayout(gridSize.n, gridSize.m), [gridSize]);
-  const edges = useMemo(() => (data?.graph ? undirectedEdges(data.graph) : []), [data]);
+  const edges = useMemo(() => (baseGraph ? undirectedEdges(baseGraph) : []), [baseGraph]);
+
+  const toggleBlocked = (id) => {
+    if (isRunning) return;
+    setBlocked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="page">
       <div className="panel">
-        <h1>Visualize graph algorithms!</h1>
+        <h1>Visualize Graph Algorithms!</h1>
         <div className="control-grid">
           <label className="field">
             <span className="field-label">Rows (n)</span>
             <input
               type="number"
               min="1"
+              max={MAX_GRID}
               value={nValue}
               onChange={(e) => setNValue(e.target.value)}
               placeholder="n"
@@ -222,6 +273,7 @@ export default function App() {
             <input
               type="number"
               min="1"
+              max={MAX_GRID}
               value={mValue}
               onChange={(e) => setMValue(e.target.value)}
               placeholder="m"
@@ -229,6 +281,7 @@ export default function App() {
           </label>
         </div>
         {notice && <div className="notice">{notice}</div>}
+        <div className="hint">Note: Click nodes to toggle blocked cells.</div>
         <div className="control-grid">
           <label className="field">
             <span className="field-label">Starting point</span>
@@ -266,21 +319,31 @@ export default function App() {
           <button
             type="button"
             onClick={async () => {
-              const ok = await runUserGraph(selectedAlgo);
-              if (ok) setTimeout(() => animate(), 0);
+              const result = await runUserGraph(selectedAlgo);
+              if (result?.ok && result?.animate) setTimeout(() => animate(), 0);
             }}
             disabled={isRunning}
           >
             {isRunning ? "Running..." : `Run ${selectedAlgo === "shortestpath" ? "shortest path" : selectedAlgo.toUpperCase()}`}
           </button>
+          <button type="button" onClick={clearAll} className="button-secondary">
+            Reset board
+          </button>
+          {blocked.size > 0 && (
+            <button type="button" onClick={() => setBlocked(new Set())} disabled={isRunning} className="button-secondary">
+              Clear blocked
+            </button>
+          )}
         </div>
       </div>
 
-      {data && (
+      {baseGraph && (
         <div className="panel">
-          <div className="result-row">
-            Order: {data.order.join(" -> ")}
-          </div>
+          {data && (
+            <div className="result-row">
+              Order: {data.order.join(" -> ")}
+            </div>
+          )}
 
           <svg width={WIDTH} height={HEIGHT} className="graph-area">
             {edges.map(([u, v]) => (
@@ -294,26 +357,30 @@ export default function App() {
               />
             ))}
 
-            {nodes.map((id) => (
-              <g key={id}>
-                <circle
-                  cx={pos[id]?.x ?? 0}
-                  cy={pos[id]?.y ?? 0}
-                  r={NODE_R}
-                  fill={visited.has(id) ? "lightgreen" : "white"}
-                  stroke="black"
-                  strokeWidth="2"
-                />
-                <text
-                  x={pos[id]?.x ?? 0}
-                  y={(pos[id]?.y ?? 0) + 5}
-                  textAnchor="middle"
-                  fontSize="14"
-                >
-                  {id}
-                </text>
-              </g>
-            ))}
+            {nodes.map((id) => {
+              const isBlocked = blocked.has(id);
+              return (
+                <g key={id} onClick={() => toggleBlocked(id)} style={{ cursor: "pointer" }}>
+                  <circle
+                    cx={pos[id]?.x ?? 0}
+                    cy={pos[id]?.y ?? 0}
+                    r={NODE_R}
+                    fill={isBlocked ? "black" : visited.has(id) ? "lightgreen" : "white"}
+                    stroke="black"
+                    strokeWidth="2"
+                  />
+                  <text
+                    x={pos[id]?.x ?? 0}
+                    y={(pos[id]?.y ?? 0) + 5}
+                    textAnchor="middle"
+                    fontSize="14"
+                    fill={isBlocked ? "white" : "black"}
+                  >
+                    {id}
+                  </text>
+                </g>
+              );
+            })}
           </svg>
         </div>
       )}

@@ -104,6 +104,15 @@ button:not(:disabled):hover {
   box-shadow: 0 8px 16px rgba(37, 99, 235, 0.2);
 }
 
+.button-secondary {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.button-secondary:not(:disabled):hover {
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
+}
+
 .notice {
   margin-top: 10px;
   padding: 10px 12px;

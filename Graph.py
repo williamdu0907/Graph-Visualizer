@@ -34,13 +34,14 @@ def grid_to_adj(n, m):
 
 
     
-def dfs(G):
+def dfs(G, blocked=None):
+    blocked = set(blocked or [])
     color, prev = {}, {}
     time = [0]
     order = []
 
     for v in G.getVertices():
-        color[v] = "WHITE"
+        color[v] = "BLACK" if v in blocked else "WHITE"
         prev[v] = None 
 
     def dfs_visit(u):
@@ -62,13 +63,17 @@ def dfs(G):
 
 
 
-def bfs(G, s):
+def bfs(G, s, blocked=None):
+    blocked = set(blocked or [])
     color, d, prev = {}, {}, {}
     order = []
     for v in G.getVertices():
-        color[v] = "WHITE"
+        color[v] = "BLACK" if v in blocked else "WHITE"
         d[v] = math.inf
         prev[v] = None
+
+    if s not in color or color[s] == "BLACK":
+        return {"order": [], "prev": prev, "distance": "NO PATH"}
 
     color[s] = "GRAY"
     count = 0
@@ -89,19 +94,27 @@ def bfs(G, s):
         color[u] = "BLACK"
     return {"order":order, "prev":prev}
 
-#shortestPath from s to b, assuming a and b are vertices of G
-def shortestPath(G, s, b):
+#shortestPath from s to b, assuming a and b are vertices of G, blocked is a collection of nodes "i,j" that are blocked
+def shortestPath(G, s, b, blocked=None):
+    blocked = set(blocked or [])
     color, d, prev = {}, {}, {}
     order = []
     for v in G.getVertices():
-        color[v] = "WHITE"
+        if v in blocked:
+            color[v] = "BLACK"
+        else:
+            color[v] = "WHITE"
         d[v] = math.inf
         prev[v] = None
+    if s not in color or b not in color:
+        return {"distance": "NO PATH", "order": order, "prev": prev}
+    if color[s] == "BLACK" or color[b] == "BLACK":
+        return {"distance": "NO PATH", "order":order, "prev":prev}
     color[s] = "GRAY"
     d[s] = 0
     prev[s] = None
     queue = deque()
-    queue.append(s)
+    queue.append(s) 
     while queue:
         u = queue.popleft()
         order.append(u)
@@ -158,7 +171,8 @@ def dfs_route():
 
 @app.route("/shortestpath/<string:s>/<string:b>")
 def shortestpath_route(s, b):
-    return jsonify({"order": shortestPath(x, s, b)["order"], "graph":x.graph_dict})
+    out = shortestPath(x, s, b, [])
+    return jsonify({"order": out["order"], "distance": out["distance"], "graph":x.graph_dict})
 
 def parse_graph(adj_json):
     return Graph(adj_json)
@@ -175,14 +189,14 @@ def run_algo():
     if algo == "bfs":
         if s not in G.getVertices():
             return jsonify({"error": f"start node {s} not in graph"}), 400
-        out = bfs(G, s)
+        out = bfs(G, s, data.get("blocked", []))
     elif algo == "dfs":
-        out = dfs(G)
+        out = dfs(G, data.get("blocked", []))
     elif algo == "shortestpath":
         if s not in G.getVertices() or b not in G.getVertices():
             return jsonify({"error": f"Endpoints are not vertices of the graph"}), 400
         try:
-            out = shortestPath(G, s, b)
+            out = shortestPath(G, s, b, data.get("blocked", []))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
     else:
@@ -191,6 +205,7 @@ def run_algo():
     return jsonify({
         "order": out["order"],
         "prev": out.get("prev", {}),
+        "distance": out.get("distance"),
         "graph": G.graph_dict
     })
 
